@@ -1,0 +1,60 @@
+# Stump AND stumpzlib together, for a host with no Stump on it yet.
+#
+# If you already run Stump, use docker-compose.yaml instead — this file would
+# stand up a SECOND Stump with an empty library, and stumpzlib would write into
+# that one rather than yours.
+#
+# Both services mount the same `books` volume. That shared mount is the entire
+# integration: stumpzlib writes a file into it, Stump scans it.
+
+services:
+  stump:
+    image: aaronleopold/stump:latest
+    container_name: stump
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - STUMP_CONFIG_DIR=/config
+    volumes:
+      - stump-config:/config
+      - books:/data
+    ports:
+      # Literal, not a ${VARIABLE}: Coolify rejects variable substitution in
+      # some compose fields. Edit here if the port is taken.
+      - "10801:10801"
+
+  stumpzlib:
+    build: .
+    container_name: stumpzlib
+    restart: unless-stopped
+    depends_on:
+      - stump
+    user: "1000:1000"
+    environment:
+      # Must be a library that exists in Stump. Create it in the Stump UI
+      # pointing at /data/books first — stumpzlib exits at startup if the
+      # directory is missing, rather than downloading into a path nothing scans.
+      - LIBRARY_PATH=/data/books
+      # Service name on the compose network, never localhost.
+      - STUMP_URL=${STUMP_URL:-http://stump:10801}
+      - STUMP_API_KEY=${STUMP_API_KEY:-}
+      - STUMP_USERNAME=${STUMP_USERNAME:-}
+      - STUMP_PASSWORD=${STUMP_PASSWORD:-}
+      - STUMP_LIBRARY_ID=${STUMP_LIBRARY_ID:-}
+      # Require a login to use stumpzlib itself. Set both or leave both blank.
+      - AUTH_USERNAME=${AUTH_USERNAME:-}
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+      - MAX_DOWNLOAD_MB=${MAX_DOWNLOAD_MB:-200}
+      - GUTENDEX_URL=${GUTENDEX_URL:-https://gutendex.com}
+      - ZLIBRARY_URL=${ZLIBRARY_URL:-}
+      - ZLIBRARY_EMAIL=${ZLIBRARY_EMAIL:-}
+      - ZLIBRARY_PASSWORD=${ZLIBRARY_PASSWORD:-}
+    volumes:
+      - books:/data
+    ports:
+      - "8081:8080"
+
+volumes:
+  stump-config:
+  books:

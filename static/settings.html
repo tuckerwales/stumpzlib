@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stumpzlib · settings</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="wrap narrow">
+  <header class="top">
+    <a class="brand" href="/"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" fill="currentColor"/><path d="M8 7.5h9.2v11H9.1A1.1 1.1 0 0 1 8 17.4V7.5z" fill="var(--accent-text)"/><rect x="6" y="3.5" width="2.2" height="17" rx=".5" fill="#000" opacity=".22"/></svg>stumpzlib</a>
+    <nav class="nav">
+      <a href="/settings.html" aria-current="page">Settings</a>
+      <a href="#" id="logout" hidden>Log out</a>
+    </nav>
+  </header>
+  <p class="lede">Where Stump lives, and the Z-library account used to search and download.</p>
+
+  <details class="status" id="status" open>
+    <summary id="statusSummary">Checking connection…</summary>
+    <div class="body" id="statusBody"></div>
+  </details>
+
+  <div class="card">
+    <h2>Stump</h2>
+    <p class="hint">Saved here instead of env vars from now on — this always wins once you save.</p>
+
+    <form id="form">
+      <label class="field" for="url">Server URL</label>
+      <input type="text" id="url" placeholder="http://stump:10801" autocomplete="off">
+
+      <label class="field" for="apiKey">API key</label>
+      <div class="secret-row">
+        <input type="password" id="apiKey" autocomplete="off">
+        <label class="clear-check"><input type="checkbox" id="clearApiKey"> clear</label>
+      </div>
+
+      <div class="or-line">or username and password</div>
+
+      <label class="field" for="username">Username</label>
+      <input type="text" id="username" autocomplete="off">
+
+      <label class="field" for="password">Password</label>
+      <div class="secret-row">
+        <input type="password" id="password" autocomplete="off">
+        <label class="clear-check"><input type="checkbox" id="clearPassword"> clear</label>
+      </div>
+
+      <label class="field" for="libraryId">Library to rescan</label>
+      <input type="text" id="libraryId" placeholder="library id" autocomplete="off">
+      <div class="lib-list" id="libList"></div>
+
+      <div class="row-actions">
+        <button type="submit" id="save">Save</button>
+      </div>
+      <div class="msg" id="msg"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Z-library</h2>
+    <p class="hint">Mirrors move around. If search starts failing, find a new server. Search works without an account; downloads and Recommended need one.</p>
+
+    <form id="zlibForm">
+      <label class="field" for="zlibUrl">Base URL</label>
+      <div class="field-row">
+        <input type="text" id="zlibUrl" placeholder="https://z-lib.example" autocomplete="off">
+        <button type="button" class="ghost" id="zlibDiscover">Auto-discover</button>
+      </div>
+
+      <label class="field" for="zlibEmail">Email</label>
+      <input type="email" id="zlibEmail" autocomplete="off">
+
+      <label class="field" for="zlibPassword">Password</label>
+      <div class="secret-row">
+        <input type="password" id="zlibPassword" autocomplete="off">
+        <label class="clear-check"><input type="checkbox" id="zlibClearPassword"> clear</label>
+      </div>
+
+      <label class="field">Languages</label>
+      <div class="chips chips-wrap" id="zlibLangs"></div>
+
+      <label class="field">Formats</label>
+      <div class="chips chips-wrap" id="zlibExts"></div>
+
+      <label class="field" for="zlibOrder">Sort order</label>
+      <select id="zlibOrder">
+        <option value="">Default</option>
+      </select>
+
+      <div class="row-actions">
+        <button type="submit" id="zlibSave">Save</button>
+        <button type="button" class="ghost" id="zlibLogin">Test login</button>
+      </div>
+      <div class="msg" id="zlibMsg"></div>
+    </form>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const msg = $('msg');
+const zlibMsg = $('zlibMsg');
+
+function say(text, kind) {
+  msg.textContent = text || '';
+  msg.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+function sayZ(text, kind) {
+  zlibMsg.textContent = text || '';
+  zlibMsg.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+async function api(url, options = {}) {
+  const { timeoutMs = 35000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res;
+  try {
+    res = await fetch(url, { ...fetchOptions, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Timed out waiting for a response — check your connection and try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  let body = {};
+  try { body = await res.json(); } catch { /* fall through to status text */ }
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function hostLabel(raw) {
+  try { return new URL(raw).host; } catch { return raw; }
+}
+
+function pill(label, ok, title) {
+  return `<span class="pill" title="${esc(title || label)}"><span class="dot ${ok ? 'on' : 'off'}"></span>${esc(label)}</span>`;
+}
+
+function row(label, value, ok) {
+  return `<div class="row"><span>${esc(label)}</span><span><span class="dot ${ok ? 'on' : 'off'}"></span>${esc(value)}</span></div>`;
+}
+
+async function loadSettings() {
+  const s = await api('/api/settings');
+  $('url').value = s.url || '';
+  $('username').value = s.username || '';
+  $('libraryId').value = s.libraryId || '';
+  $('apiKey').placeholder = s.hasApiKey ? '(unchanged — leave blank to keep)' : '';
+  $('password').placeholder = s.hasPassword ? '(unchanged — leave blank to keep)' : '';
+}
+
+async function loadStatus() {
+  try {
+    const s = await api('/api/status');
+    if (s.authEnabled) $('logout').hidden = false;
+
+    const pills = [];
+    pills.push(pill(s.stumpOk ? 'Stump connected' : 'Stump offline', s.stumpOk, s.stumpUrl + (s.stumpError ? ' — ' + s.stumpError : '')));
+    if (s.libraryId) pills.push(pill('Rescan on', s.stumpOk, 'library ' + s.libraryId));
+    if (s.zlibrary) {
+      const z = s.zlibrary;
+      let zLabel = 'Z-library';
+      if (!z.baseUrl) zLabel = 'Z-library not set';
+      else if (z.hasSession) zLabel = 'Z-library signed in';
+      else if (z.hasCredentials) zLabel = 'Z-library signed out';
+      pills.push(pill(zLabel, !!(z.baseUrl), z.baseUrl || 'Set a base URL below'));
+    }
+    $('statusSummary').innerHTML = pills.join('');
+
+    const rows = [];
+    rows.push(row('Stump', s.stumpUrl + (s.stumpOk ? '' : '  — ' + (s.stumpError || 'unreachable')), s.stumpOk));
+    if (s.libraryId) rows.push(row('Rescan', 'library ' + s.libraryId, s.stumpOk));
+    if (s.zlibrary && s.zlibrary.baseUrl) {
+      rows.push(row('Z-library', hostLabel(s.zlibrary.baseUrl), true));
+    }
+    $('statusBody').innerHTML = rows.join('');
+
+    const list = $('libList');
+    list.innerHTML = '';
+    if ((s.libraries || []).length) {
+      for (const l of s.libraries) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'chip' + (l.id === $('libraryId').value ? ' on' : '');
+        b.textContent = l.name;
+        b.title = l.id;
+        b.addEventListener('click', () => {
+          $('libraryId').value = l.id;
+          for (const c of list.querySelectorAll('.chip')) c.classList.remove('on');
+          b.classList.add('on');
+        });
+        list.append(b);
+      }
+    }
+  } catch (err) {
+    $('statusSummary').innerHTML = `<span class="pill"><span class="dot off"></span>${esc(err.message)}</span>`;
+  }
+}
+
+$('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('save').disabled = true;
+  say('Saving…');
+
+  try {
+    await api('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: $('url').value.trim(),
+        apiKey: $('apiKey').value,
+        clearApiKey: $('clearApiKey').checked,
+        username: $('username').value.trim(),
+        password: $('password').value,
+        clearPassword: $('clearPassword').checked,
+        libraryId: $('libraryId').value.trim(),
+      }),
+    });
+    $('apiKey').value = '';
+    $('password').value = '';
+    $('clearApiKey').checked = false;
+    $('clearPassword').checked = false;
+    say('Saved.', 'ok');
+    await Promise.all([loadSettings(), loadStatus()]);
+  } catch (err) {
+    say(err.message, 'err');
+  } finally {
+    $('save').disabled = false;
+  }
+});
+
+$('logout').addEventListener('click', async (e) => {
+  e.preventDefault();
+  await fetch('/logout', { method: 'POST' });
+  location.href = '/login';
+});
+
+function chipValues(container) {
+  return [...container.querySelectorAll('.chip.on')].map(b => b.dataset.value);
+}
+
+function fillChips(container, opts, selected) {
+  container.innerHTML = '';
+  const picked = new Set(selected || []);
+  for (const o of opts || []) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip' + (picked.has(o.value) ? ' on' : '');
+    b.dataset.value = o.value;
+    b.textContent = o.name;
+    b.addEventListener('click', () => b.classList.toggle('on'));
+    container.append(b);
+  }
+}
+
+async function loadZlibrary() {
+  const z = await api('/api/zlibrary');
+  $('zlibUrl').value = z.baseUrl || '';
+  $('zlibEmail').value = z.email || '';
+  $('zlibPassword').placeholder = z.hasPassword ? '(unchanged — leave blank to keep)' : '';
+  fillChips($('zlibLangs'), z.languageOpts, z.languages);
+  fillChips($('zlibExts'), z.extensionOpts, z.extensions);
+  const order = $('zlibOrder');
+  order.innerHTML = '<option value="">Default</option>';
+  for (const o of z.orderOpts || []) {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.name;
+    if (z.order && o.value === z.order) opt.selected = true;
+    order.append(opt);
+  }
+}
+
+$('zlibForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('zlibSave').disabled = true;
+  sayZ('Saving…');
+  try {
+    await api('/api/zlibrary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: $('zlibUrl').value.trim(),
+        email: $('zlibEmail').value.trim(),
+        password: $('zlibPassword').value,
+        clearPassword: $('zlibClearPassword').checked,
+        languages: chipValues($('zlibLangs')),
+        extensions: chipValues($('zlibExts')),
+        order: $('zlibOrder').value,
+      }),
+    });
+    $('zlibPassword').value = '';
+    $('zlibClearPassword').checked = false;
+    sayZ('Saved.', 'ok');
+    await loadZlibrary();
+    await loadStatus();
+  } catch (err) {
+    sayZ(err.message, 'err');
+  } finally {
+    $('zlibSave').disabled = false;
+  }
+});
+
+$('zlibDiscover').addEventListener('click', async () => {
+  $('zlibDiscover').disabled = true;
+  sayZ('Looking for a working server — this can take a minute…');
+  try {
+    const r = await api('/api/zlibrary/discover', { method: 'POST', timeoutMs: 70000 });
+    sayZ(r.message || ('Using ' + r.baseUrl), 'ok');
+    await loadZlibrary();
+    await loadStatus();
+  } catch (err) {
+    sayZ(err.message, 'err');
+  } finally {
+    $('zlibDiscover').disabled = false;
+  }
+});
+
+$('zlibLogin').addEventListener('click', async () => {
+  $('zlibLogin').disabled = true;
+  sayZ('Signing in…');
+  try {
+    const r = await api('/api/zlibrary/login', { method: 'POST' });
+    let text = 'Signed in.';
+    if (r.downloadsLimit != null) {
+      text += ` Downloads today: ${r.downloadsToday} / ${r.downloadsLimit}.`;
+    }
+    sayZ(text, 'ok');
+    await loadStatus();
+  } catch (err) {
+    sayZ(err.message, 'err');
+  } finally {
+    $('zlibLogin').disabled = false;
+  }
+});
+
+loadSettings().catch(err => say(err.message, 'err'));
+loadZlibrary().catch(err => sayZ(err.message, 'err'));
+loadStatus();
+</script>
+</body>
+</html>

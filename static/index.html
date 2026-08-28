@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stumpzlib</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="/" aria-current="page"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" fill="currentColor"/><path d="M8 7.5h9.2v11H9.1A1.1 1.1 0 0 1 8 17.4V7.5z" fill="var(--accent-text)"/><rect x="6" y="3.5" width="2.2" height="17" rx=".5" fill="#000" opacity=".22"/></svg>stumpzlib</a>
+    <nav class="nav">
+      <a href="/settings.html">Settings</a>
+      <a href="#" id="logout" hidden>Log out</a>
+    </nav>
+  </header>
+  <p class="lede">Search a catalog and drop the file straight into your Stump library.</p>
+
+  <details class="status" id="status">
+    <summary id="statusSummary">Checking configuration…</summary>
+    <div class="body" id="statusBody"></div>
+  </details>
+
+  <div class="search-panel">
+    <div class="search-bar">
+      <div class="seg" id="sources" role="radiogroup" aria-label="Catalog"></div>
+      <form class="search-form" id="form">
+        <input type="search" id="q" placeholder="Title, author or subject…" autocomplete="off" autofocus>
+        <button type="submit" id="go">Search</button>
+      </form>
+    </div>
+    <div class="filters" id="filters" hidden>
+      <label class="filter">
+        <span>Language</span>
+        <select id="lang"><option value="">All languages</option></select>
+      </label>
+      <label class="filter">
+        <span>Format</span>
+        <select id="ext"><option value="">All formats</option></select>
+      </label>
+      <label class="filter">
+        <span>Sort</span>
+        <select id="order"><option value="">Default</option></select>
+      </label>
+      <div class="browse">
+        <button type="button" class="ghost" id="popular">Most popular</button>
+        <button type="button" class="ghost" id="recommended">Recommended</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="results-head">
+    <span id="msg" class="msg"></span>
+  </div>
+  <ul class="books" id="results">
+    <li class="empty-card">
+      <strong>Find a book</strong>
+      <p>Search a catalog, then add it to your Stump library.</p>
+    </li>
+  </ul>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const results = $('results'), msg = $('msg');
+
+let currentSource = '';
+let currentList = '';
+
+function say(text, kind) {
+  msg.textContent = text || '';
+  msg.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+async function api(url, options = {}) {
+  const { timeoutMs = 35000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res;
+  try {
+    res = await fetch(url, { ...fetchOptions, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Timed out waiting for a response — check your connection and try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  let body = {};
+  try { body = await res.json(); } catch { /* fall through to status text */ }
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function hostLabel(raw) {
+  try { return new URL(raw).host; } catch { return raw; }
+}
+
+function pill(label, ok, title) {
+  return `<span class="pill" title="${esc(title || label)}"><span class="dot ${ok ? 'on' : 'off'}"></span>${esc(label)}</span>`;
+}
+
+function row(label, value, ok) {
+  return `<div class="row"><span>${esc(label)}</span><span><span class="dot ${ok ? 'on' : 'off'}"></span>${esc(value)}</span></div>`;
+}
+
+async function loadStatus() {
+  try {
+    const s = await api('/api/status');
+    if (s.authEnabled) $('logout').hidden = false;
+
+    renderSources(s.sources || [], s.zlibrary);
+    syncFilters();
+
+    const pills = [];
+    pills.push(pill(s.writable ? 'Library' : 'Library not writable', s.writable, s.libraryPath));
+    pills.push(pill(s.stumpOk ? 'Stump' : 'Stump offline', s.stumpOk, s.stumpUrl + (s.stumpError ? ' — ' + s.stumpError : '')));
+    if (s.zlibrary) {
+      const z = s.zlibrary;
+      let zLabel = 'Z-library';
+      if (!z.baseUrl) zLabel = 'Z-library not set';
+      else if (z.hasSession) zLabel = 'Z-library signed in';
+      else if (z.hasCredentials) zLabel = 'Z-library signed out';
+      const zTitle = z.baseUrl || 'Set a base URL in Settings';
+      pills.push(pill(zLabel, !!(z.baseUrl && (z.hasSession || !z.hasCredentials)), zTitle));
+    }
+    $('statusSummary').innerHTML = pills.join('');
+
+    const rows = [];
+    rows.push(row('Library', s.libraryPath + (s.writable ? '' : '  (not writable!)'), s.writable));
+    rows.push(row('Stump', s.stumpUrl + (s.stumpOk ? '' : '  — ' + (s.stumpError || 'unreachable')), s.stumpOk));
+    if (s.stumpOk && !s.libraryId && (s.libraries || []).length) {
+      const ids = s.libraries.map(l => `${l.name} → ${l.id}`).join(' · ');
+      rows.push(`<div class="row"><span>Rescan</span><span>off — pick a library in Settings: ${esc(ids)}</span></div>`);
+    } else if (s.libraryId) {
+      rows.push(row('Rescan', 'library ' + s.libraryId, s.stumpOk));
+    }
+    if (s.zlibrary) {
+      const z = s.zlibrary;
+      const zLabel = z.baseUrl
+        ? (z.hasSession ? hostLabel(z.baseUrl) + '  (signed in)' : (z.hasCredentials ? hostLabel(z.baseUrl) + '  (not signed in)' : hostLabel(z.baseUrl)))
+        : 'not configured — set a base URL in Settings';
+      rows.push(row('Z-library', zLabel, !!(z.baseUrl)));
+    }
+    $('statusBody').innerHTML = rows.join('');
+  } catch (err) {
+    $('statusSummary').innerHTML = `<span class="pill"><span class="dot off"></span>${esc(err.message)}</span>`;
+    $('statusBody').textContent = '';
+  }
+}
+
+function renderSources(sources, zlibrary) {
+  const box = $('sources');
+  box.innerHTML = '';
+  if (!sources.length) return;
+
+  let initial = currentSource;
+  if (!initial) {
+    initial = (zlibrary && !zlibrary.baseUrl) ? 'gutenberg' : sources[0].name;
+  }
+
+  for (const src of sources) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('role', 'radio');
+    btn.dataset.name = src.name;
+    if (src.browse) btn.dataset.browse = '1';
+    btn.textContent = src.label;
+    btn.setAttribute('aria-checked', src.name === initial ? 'true' : 'false');
+    btn.addEventListener('click', () => selectSource(src.name));
+    box.append(btn);
+  }
+  currentSource = initial;
+}
+
+function selectSource(name) {
+  currentSource = name;
+  currentList = '';
+  $('popular').classList.remove('on');
+  $('recommended').classList.remove('on');
+  for (const btn of $('sources').querySelectorAll('button')) {
+    btn.setAttribute('aria-checked', btn.dataset.name === name ? 'true' : 'false');
+  }
+  syncFilters();
+}
+
+function syncFilters() {
+  const btn = [...$('sources').querySelectorAll('button')].find(b => b.dataset.name === currentSource);
+  $('filters').hidden = !(btn && btn.dataset.browse === '1');
+}
+
+async function loadZlibraryFilters() {
+  try {
+    const z = await api('/api/zlibrary');
+    fillSelect($('lang'), z.languageOpts, 'All languages', '');
+    fillSelect($('ext'), z.extensionOpts, 'All formats', '');
+    fillSelect($('order'), z.orderOpts, 'Default', z.order || '');
+  } catch {
+    /* filters stay empty; search still works */
+  }
+}
+
+function fillSelect(sel, opts, emptyLabel, selected) {
+  const keepFirst = sel.options[0];
+  sel.innerHTML = '';
+  sel.append(keepFirst || new Option(emptyLabel, ''));
+  if (keepFirst) keepFirst.textContent = emptyLabel;
+  for (const o of opts || []) {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.name;
+    if (selected && o.value === selected) opt.selected = true;
+    sel.append(opt);
+  }
+}
+
+function searchURL(extra = {}) {
+  const params = new URLSearchParams();
+  params.set('source', currentSource || 'gutenberg');
+  if (extra.list) {
+    params.set('list', extra.list);
+  } else {
+    params.set('q', extra.q || $('q').value.trim());
+  }
+  const lang = $('lang').value;
+  const ext = $('ext').value;
+  const order = $('order').value;
+  if (lang) params.set('lang', lang);
+  if (ext) params.set('ext', ext);
+  if (order) params.set('order', order);
+  return '/api/search?' + params.toString();
+}
+
+function showSkeletons() {
+  results.innerHTML = '<li class="skel"></li><li class="skel"></li><li class="skel"></li>';
+}
+
+async function runSearch(url, emptyQueryOk = false) {
+  if (!emptyQueryOk && !$('q').value.trim() && !url.includes('list=')) return;
+  $('go').disabled = true;
+  say('Searching…');
+  showSkeletons();
+  try {
+    const data = await api(url);
+    render(data.results || []);
+    const n = (data.results || []).length;
+    if (!n) {
+      say('');
+    } else if (currentList === 'popular') {
+      say(`Most popular · ${n}`);
+    } else if (currentList === 'recommended') {
+      say(`Recommended · ${n}`);
+    } else {
+      say(`${n} result${n === 1 ? '' : 's'}`);
+    }
+  } catch (err) {
+    results.innerHTML = `<li class="empty-card"><strong>Couldn’t search</strong><p>${esc(err.message)}</p></li>`;
+    say(err.message, 'err');
+  } finally {
+    $('go').disabled = false;
+  }
+}
+
+$('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  currentList = '';
+  $('popular').classList.remove('on');
+  $('recommended').classList.remove('on');
+  await runSearch(searchURL());
+});
+
+$('popular').addEventListener('click', () => {
+  currentList = 'popular';
+  $('popular').classList.add('on');
+  $('recommended').classList.remove('on');
+  runSearch(searchURL({ list: 'popular' }), true);
+});
+$('recommended').addEventListener('click', () => {
+  currentList = 'recommended';
+  $('recommended').classList.add('on');
+  $('popular').classList.remove('on');
+  runSearch(searchURL({ list: 'recommended' }), true);
+});
+
+function bookTags(b) {
+  const parts = [];
+  if (b.language) parts.push(b.language);
+  for (const bit of (b.note || '').split(' · ')) {
+    if (bit && bit !== b.language) parts.push(bit);
+  }
+  if (!parts.length) return '';
+  return `<div class="tags">${parts.map(p => `<span class="tag">${esc(p)}</span>`).join('')}</div>`;
+}
+
+function render(books) {
+  if (!books.length) {
+    const q = $('q').value.trim();
+    const title = currentList ? 'Nothing in this list.' : (q ? `No matches for “${q}”.` : 'No matches.');
+    results.innerHTML = `<li class="empty-card"><strong>${esc(title)}</strong><p>Try another query, or switch catalogs.</p></li>`;
+    return;
+  }
+
+  results.innerHTML = '';
+  for (const b of books) {
+    const li = document.createElement('li');
+    li.className = 'book';
+
+    const cover = b.coverUrl
+      ? `<img class="cover" src="${esc(b.coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+      : '<div class="cover missing" aria-hidden="true"></div>';
+
+    li.innerHTML = `
+      ${cover}
+      <div class="meta">
+        <div class="title">${esc(b.title)}</div>
+        <div class="author">${esc((b.authors || []).join(', ') || 'Unknown author')}</div>
+        ${bookTags(b)}
+      </div>
+      <div class="actions">
+        <button type="button">Add to Stump</button>
+        <div class="result-msg"></div>
+      </div>`;
+
+    const img = li.querySelector('img.cover');
+    if (img) {
+      img.addEventListener('error', () => {
+        const ph = document.createElement('div');
+        ph.className = 'cover missing';
+        ph.setAttribute('aria-hidden', 'true');
+        img.replaceWith(ph);
+      });
+    }
+
+    const btn = li.querySelector('button');
+    const out = li.querySelector('.result-msg');
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>Adding…';
+      out.className = 'result-msg';
+      out.textContent = '';
+      try {
+        const r = await api('/api/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: b.source, id: b.id }),
+          timeoutMs: 11 * 60 * 1000,
+        });
+        out.className = 'result-msg ok';
+        out.textContent = r.message;
+        btn.textContent = r.status === 'already-present' ? 'In library' : 'Added';
+        btn.classList.add('ghost');
+      } catch (err) {
+        out.className = 'result-msg err';
+        out.textContent = err.message;
+        btn.textContent = 'Add to Stump';
+        btn.disabled = false;
+      }
+    });
+
+    results.append(li);
+  }
+}
+
+$('logout').addEventListener('click', async (e) => {
+  e.preventDefault();
+  await fetch('/logout', { method: 'POST' });
+  location.href = '/login';
+});
+
+(function boot() {
+  const p = new URLSearchParams(location.search);
+  if (p.get('source')) currentSource = p.get('source');
+  loadStatus().then(loadZlibraryFilters).then(() => {
+    if (p.get('q')) {
+      $('q').value = p.get('q');
+      return runSearch(searchURL());
+    }
+    if (p.get('list') === 'popular') $('popular').click();
+    else if (p.get('list') === 'recommended') $('recommended').click();
+  });
+})();
+</script>
+</body>
+</html>

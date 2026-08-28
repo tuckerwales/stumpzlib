@@ -1,0 +1,81 @@
+# Deploys ONLY stumpzlib, against a Stump server you already run.
+#
+# If Stump is already up, do not deploy a second one: it comes up with its own
+# empty library, stumpzlib writes into that, and your real library stays empty
+# — a deploy that goes green and does nothing. To install both from scratch,
+# use docker-compose.with-stump.yaml.
+#
+# ---------------------------------------------------------------------------
+# TWO LINES TO CHECK BEFORE DEPLOYING, both marked EDIT ME below:
+#   1. the bind mount source — the host directory of your Stump library
+#   2. the published port    — must be free on the host
+#
+# Both are literal rather than ${VARIABLES} on purpose. Coolify rejects a
+# compose file that uses variable substitution in a volume source:
+#
+#   Invalid volume source: contains forbidden character '${'
+#
+# Everything under `environment:` is still a ${VARIABLE}, so Coolify surfaces
+# those in the UI as editable environment variables.
+# ---------------------------------------------------------------------------
+
+services:
+  stumpzlib:
+    build: .
+    container_name: stumpzlib
+    restart: unless-stopped
+
+    # Match the user your Stump runs as (its PUID/PGID), so downloaded books
+    # are owned consistently rather than by root.
+    user: "1000:1000"
+
+    environment:
+      # Container-side path. Pairs with the bind mount below; leave it alone
+      # and change the host side there instead.
+      - LIBRARY_PATH=/data/books
+
+      # Your existing Stump. The default reaches a Stump publishing 10801 on
+      # this host, via the host gateway mapped at the bottom — which works
+      # without knowing the name of Stump's Docker network.
+      - STUMP_URL=${STUMP_URL:-http://host.docker.internal:10801}
+
+      # Authenticate with an API key, or a username/password pair.
+      - STUMP_API_KEY=${STUMP_API_KEY:-}
+      - STUMP_USERNAME=${STUMP_USERNAME:-}
+      - STUMP_PASSWORD=${STUMP_PASSWORD:-}
+
+      # Library to rescan after each add. Blank just skips the rescan; Stump
+      # still finds new files on its next scheduled scan.
+      - STUMP_LIBRARY_ID=${STUMP_LIBRARY_ID:-}
+
+      # Require a login to use stumpzlib itself. Set both or leave both blank.
+      - AUTH_USERNAME=${AUTH_USERNAME:-}
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+
+      - MAX_DOWNLOAD_MB=${MAX_DOWNLOAD_MB:-200}
+      - GUTENDEX_URL=${GUTENDEX_URL:-https://gutendex.com}
+
+      # Z-library. Search works without an account; downloads need email+password.
+      - ZLIBRARY_URL=${ZLIBRARY_URL:-}
+      - ZLIBRARY_EMAIL=${ZLIBRARY_EMAIL:-}
+      - ZLIBRARY_PASSWORD=${ZLIBRARY_PASSWORD:-}
+
+    volumes:
+      # EDIT ME (1/2): the host directory your existing Stump library lives in.
+      # It must be the same directory Stump scans, or downloads succeed and
+      # never appear. Find it with:
+      #   docker inspect <stump-container> \
+      #     --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
+      # If Stump binds /opt/media -> /data and its library is /data/books,
+      # then the host path is /opt/media/books.
+      - /opt/media/books:/data/books
+
+    ports:
+      # EDIT ME (2/2): host port. Must be free — check with `ss -ltn`.
+      # 8080 is commonly taken (Coolify itself, among others), so this
+      # defaults to 8081.
+      - "8081:8080"
+
+    # Lets the default STUMP_URL above reach a Stump publishing on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
