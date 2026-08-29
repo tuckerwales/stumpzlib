@@ -172,63 +172,71 @@ func loginPage(showError bool) string {
 <title>stumpzlib · log in</title>
 <style>
   :root {
-    --bg: #f4f1ea; --panel: #fffcf7; --border: #e0d8cc;
-    --text: #241f1a; --muted: #6d665c; --accent: #8a5a2b;
-    --accent-hover: #734a22; --accent-text: #fffaf4; --err: #a33a2a;
+    --bg: #f4f1ea; --bg-accent: #efeae1; --panel: #fffcf7; --border: #e0d8cc;
+    --border-strong: #cfc4b3; --text: #241f1a; --muted: #6d665c; --accent: #8a5a2b;
+    --accent-hover: #734a22; --accent-text: #fffaf4; --err: #a33a2a; --err-bg: #f8ebe8;
     --shadow: 0 1px 2px rgba(36,31,26,.05), 0 10px 28px rgba(36,31,26,.06);
+    --h: 40px; --r: 10px; --r-lg: 14px;
+    color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16140f; --panel: #221f18; --border: #3b352a;
-      --text: #ece7dd; --muted: #9d968a; --accent: #c98a4b;
-      --accent-hover: #d49a5c; --accent-text: #17150f; --err: #e08a78;
+      --bg: #16140f; --bg-accent: #1c1913; --panel: #221f18; --border: #3b352a;
+      --border-strong: #4d4638; --text: #ece7dd; --muted: #9d968a; --accent: #c98a4b;
+      --accent-hover: #d49a5c; --accent-text: #17150f; --err: #e08a78; --err-bg: #3a2420;
       --shadow: 0 1px 0 rgba(255,255,255,.03);
+      color-scheme: dark;
     }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(900px 420px at 50% -80px, #efeae1, transparent 70%), var(--bg);
+    background: radial-gradient(900px 420px at 50% -80px, var(--bg-accent), transparent 70%), var(--bg);
     color: var(--text);
     font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  }
-  @media (prefers-color-scheme: dark) {
-    body { background: radial-gradient(900px 420px at 50% -80px, #1c1913, transparent 70%), var(--bg); }
+    -webkit-font-smoothing: antialiased;
   }
   .card {
     width: 100%; max-width: 340px; margin: 20px; padding: 28px;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
     box-shadow: var(--shadow);
   }
   .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
   .mark { width: 26px; height: 26px; flex: none; display: block; color: var(--accent); }
   h1 { margin: 0; font: 600 22px/1.2 Georgia, "Palatino Linotype", Palatino, serif; letter-spacing: -.02em; }
   .lede { color: var(--muted); font-size: 14px; margin: 8px 0 20px; }
-  label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 16px 0 6px; }
   input {
-    width: 100%; font: inherit; color: var(--text); background: var(--bg);
-    border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px;
+    width: 100%; height: var(--h); padding: 0 12px; font: inherit;
+    color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: var(--r);
   }
-  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input:hover:not(:focus) { border-color: var(--border-strong); }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button {
-    width: 100%; margin-top: 20px; font: inherit; font-weight: 600; cursor: pointer;
-    border: 1px solid transparent; border-radius: 9px; padding: 10px 16px;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 100%; height: var(--h); margin-top: 22px; padding: 0 16px;
+    font: inherit; font-weight: 600; line-height: 1; cursor: pointer;
+    border: 1px solid transparent; border-radius: var(--r);
     background: var(--accent); color: var(--accent-text);
   }
   button:hover { background: var(--accent-hover); }
-  .err { color: var(--err); font-size: 13px; margin: 14px 0 0; }
+  .err {
+    color: var(--err); background: var(--err-bg); font-size: 13px;
+    padding: 9px 11px; border-radius: var(--r); margin: 0 0 18px;
+  }
 </style>
 </head>
 <body>
   <form class="card" method="post" action="/login">
     <div class="brand"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" fill="currentColor"/><path d="M8 7.5h9.2v11H9.1A1.1 1.1 0 0 1 8 17.4V7.5z" fill="var(--accent-text)"/><rect x="6" y="3.5" width="2.2" height="17" rx=".5" fill="#000" opacity=".22"/></svg><h1>stumpzlib</h1></div>
     <p class="lede">Sign in to search catalogs and add books to Stump.</p>
+    ` + errBlock + `
     <label for="username">Username</label>
     <input type="text" id="username" name="username" autocomplete="username" autofocus required>
     <label for="password">Password</label>
     <input type="password" id="password" name="password" autocomplete="current-password" required>
     <button type="submit">Log in</button>
-    ` + errBlock + `
   </form>
 </body>
 </html>`
