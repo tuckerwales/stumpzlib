@@ -6,6 +6,8 @@ and the file lands in your library directory and Stump rescans.
 
 Single Go binary, no dependencies, UI embedded.
 
+<img width="889" height="621" alt="Screenshot 2026-08-29 at 09 43 08" src="https://github.com/user-attachments/assets/d567f69b-98ad-4568-9ef5-c8ba23ac348a" />
+
 ## What it searches
 
 - **Z-library**, using the same eAPI as the [KOReader plugin](https://github.com/ZlibraryKO/zlibrary.koplugin): search, language/format filters, most popular, recommended, and authenticated download. Mirrors can be auto-discovered.
