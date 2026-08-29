@@ -6,7 +6,7 @@ and the file lands in your library directory and Stump rescans.
 
 Single Go binary, no dependencies, UI embedded.
 
-<img width="889" height="621" alt="Screenshot 2026-08-29 at 09 43 08" src="https://github.com/user-attachments/assets/d567f69b-98ad-4568-9ef5-c8ba23ac348a" />
+<img width="914" height="602" alt="Screenshot 2026-08-29 at 16 51 28" src="https://github.com/user-attachments/assets/3f6296d5-8d31-4ce1-9c5b-23277a79d51d" />
 
 ## What it searches
 
